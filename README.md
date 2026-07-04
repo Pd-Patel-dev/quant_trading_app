@@ -1,38 +1,208 @@
 # Quant Strategy Lab
 
-A modular Python application for researching algorithmic trading strategies. Quant Strategy Lab connects to Alpaca for historical market data and paper account access, runs backtests with realistic execution assumptions, and presents results through an interactive Streamlit dashboard.
+A modular Python application for researching algorithmic trading strategies. Quant Strategy Lab connects to Alpaca for historical market data and paper account access, runs backtests with realistic execution assumptions, and supports manual paper-order workflows with strategy-level virtual fund allocation.
 
-**Current release:** Milestone 1 - Research and Backtesting  
+**Current release:** Milestone 3 - Automated Daily Paper Trading Workflow  
 **Trading mode:** Paper only (live trading disabled)
 
 ---
 
 ## Overview
 
-Quant Strategy Lab is designed to help you move from idea to evidence in a structured way:
+Quant Strategy Lab helps you move from idea to evidence in a structured way:
 
 1. Download historical OHLCV data from Alpaca
 2. Apply a strategy to generate signals
 3. Simulate trades with a backtesting engine
-4. Review performance metrics, charts, and trade history
-5. Persist backtest summaries to a local SQLite database
+4. Create and activate strategies with virtual fund allocation
+5. Evaluate daily signals and generate paper order proposals
+6. Manually confirm and submit paper orders to Alpaca
+7. Track strategy-level positions and cash in a local ledger
 
 The architecture is intentionally modular so new strategies can be added without changing the backtesting engine or UI framework.
 
 ---
 
-## Features
+## Milestone 2 Features
 
 | Area | Capability |
 |------|------------|
-| Market data | Daily OHLCV bars via Alpaca (IEX feed for free-tier accounts) |
-| Strategies | Moving Average Crossover (50/200 default) with extensible BaseStrategy interface |
-| Backtesting | Long-only, whole-share execution with slippage, commission, and cash reserve |
-| Metrics | Total return, buy-and-hold comparison, drawdown, Sharpe ratio, win rate |
-| Dashboard | Streamlit multipage UI with Plotly charts and CSV exports |
-| Storage | SQLite for backtest summaries and future portfolio tracking |
-| Paper account | Read-only Alpaca paper account connection (no order submission) |
-| Testing | 27 deterministic pytest tests with no live API calls required |
+| Strategy management | Create, draft, activate, pause, resume, and stop MA crossover strategies |
+| Virtual allocation | Local paper capital pool with per-strategy fund allocation |
+| Signal evaluation | Daily completed-bar signal evaluation with entry policies |
+| Order proposals | Risk-validated BUY/SELL proposals (not auto-submitted) |
+| Manual confirmation | Requires PAPER text and checkboxes before submission |
+| Paper orders | Alpaca market orders (paper=True, whole shares, DAY) |
+| Order sync | Fill, partial fill, reject, and cancel synchronization |
+| Strategy ledger | Append-only cash ledger and local position tracking |
+| Portfolio view | Managed vs unmanaged position reconciliation warnings |
+| Safety script | Read-only readiness checks before trading |
+| **Automation (M3)** | One-shot CLI workers for after-close evaluation, market-open execution, order sync, and reconciliation |
+| **Kill switch** | Global emergency block on automated submissions (engaged by default) |
+| **Audit log** | Append-only record of every automation event |
+
+---
+
+## Milestone 3 — Automated Daily Paper Trading
+
+Streamlit is the **monitoring and configuration interface only**. Automated trading runs through **one-shot CLI workers** that start, perform one job, record results, and exit. Schedule them with Windows Task Scheduler (tasks are created **disabled** by default).
+
+### Daily Timeline
+
+```text
+Market closes
+    ↓
+After-close worker evaluates completed bars
+    ↓
+New signal and proposal are saved
+    ↓
+Next market day begins
+    ↓
+Market-open worker revalidates proposal
+    ↓
+Paper order is submitted
+    ↓
+Synchronization worker processes order updates
+    ↓
+Ledger and position are updated
+```
+
+### Why Workers Run Outside Streamlit
+
+Streamlit reruns the entire script on every interaction. A background scheduler or infinite loop inside Streamlit would be unreliable and unsafe for order submission. Workers are independent processes with database-backed locks.
+
+### Global Automation Approval
+
+Global automation is **disabled by default**. To enable:
+
+1. Readiness checks must pass (no unknown orders, no critical reconciliation issues)
+2. Check both acknowledgment boxes on the Automation page
+3. Type exactly: `ENABLE AUTOMATED PAPER TRADING`
+
+Enabling global automation does **not** enable individual strategies.
+
+### Per-Strategy Automation Approval
+
+Each strategy has `automation_enabled = false` by default. To enable for a strategy:
+
+1. Strategy must be active with valid allocation
+2. Global automation must be enabled
+3. Check: `I understand this strategy may place paper orders automatically`
+4. Type exactly: `ENABLE PAPER AUTOMATION`
+
+Disabling automation (global or per-strategy) does **not** cancel open orders or liquidate positions.
+
+### Kill Switch
+
+The kill switch defaults to **engaged** after a fresh database install. When engaged:
+
+- No automated order may be submitted
+- Signal evaluation, sync, and reconciliation still run
+- Manual paper orders remain available with existing confirmation
+
+Engage: one click on the Automation page.  
+Disengage: type exactly `DISENGAGE PAPER KILL SWITCH`
+
+The kill switch is checked when proposals are generated, before approval, and immediately before Alpaca submission.
+
+### Safety Limits
+
+| Setting | Default |
+|---------|---------|
+| `MAX_AUTOMATED_ORDER_NOTIONAL` | 500.0 |
+| `MAX_AUTOMATED_ORDERS_PER_DAY` | 3 |
+| `MAX_AUTOMATED_DAILY_NOTIONAL` | 1,000.0 |
+| `MAX_ACTIVE_MANAGED_POSITIONS` | 3 |
+
+Daily limits count only orders **successfully submitted** to Alpaca on the current trading day. Blocked or rejected proposals do not count.
+
+### Worker Commands
+
+```powershell
+python -m workers.evaluate_daily_strategies      # After close (~4:15 PM ET)
+python -m workers.execute_market_open_orders     # Market open (~9:35 AM ET)
+python -m workers.synchronize_paper_orders       # Every 5 min during market hours
+python -m workers.daily_reconciliation           # After close reconciliation
+python -m workers.automation_readiness           # Read-only readiness check
+```
+
+### PowerShell Scripts
+
+```powershell
+.\scripts\run_after_close_evaluation.ps1
+.\scripts\run_market_open_execution.ps1
+.\scripts\run_order_sync.ps1
+.\scripts\run_daily_reconciliation.ps1
+```
+
+Logs are written to `storage/logs/`.
+
+### Windows Task Scheduler
+
+```powershell
+.\scripts\install_windows_tasks.ps1
+```
+
+Creates disabled tasks: `QuantStrategyLab-AfterCloseEvaluation`, `QuantStrategyLab-MarketOpenExecution`, `QuantStrategyLab-OrderSync`, `QuantStrategyLab-DailyReconciliation`.
+
+**Important:** Task Scheduler uses your computer's local timezone. Convert from `America/New_York` before enabling tasks. Workers use Alpaca's market clock internally to skip weekends and holidays.
+
+### Disable Automation Immediately
+
+1. Click **ENGAGE EMERGENCY KILL SWITCH** on the Automation page, or
+2. Click **Disable Automated Paper Trading**, or
+3. Disable individual strategy automation
+
+### Troubleshooting
+
+| Issue | Action |
+|-------|--------|
+| Worker blocked by lock | Wait for TTL expiry (30 min) or delete stale row in `automation_worker_locks` |
+| Readiness NOT READY | Run `python -m workers.automation_readiness` and fix failed checks |
+| Unknown orders | Synchronize orders manually; resolve before enabling automation |
+| Reconciliation warnings | Review Automation page; mismatches are not auto-repaired |
+
+Paper trading is a simulation. Simulated fills and performance can differ from live trading because of liquidity, latency, slippage, market impact, queue position, and other market conditions.
+
+---
+
+## Strategy Allocation and Local Ledger
+
+Alpaca maintains positions at the **account level**, not per strategy. Quant Strategy Lab maintains its own **local strategy ledger**:
+
+- Each strategy has a virtual allocation from the local paper capital pool
+- Cash, reserves, buys, sells, and commissions are recorded as append-only ledger entries
+- Strategy positions are tracked locally in SQLite
+- Only one active strategy may trade a given symbol
+- Alpaca buying power is used only as an additional broker-level validation
+
+Corrections are made via new ledger adjustment entries. Existing ledger rows are never deleted.
+
+---
+
+## Manual Order Workflow
+
+1. Create and **activate** a strategy on the Strategies page
+2. Open **Paper Trading** and select the active strategy
+3. Click **Evaluate Strategy** (generates a proposal, does not submit)
+4. Review validations, warnings, and blocking reasons
+5. Confirm with checkboxes and type **PAPER**
+6. For alignment entries, also type **ALIGN**
+7. Click **Submit Confirmed Paper Order** (separate step, idempotent)
+8. Refresh order status to synchronize fills
+
+Streamlit reruns will **not** submit orders. Submission is blocked after the first successful submit for a proposal.
+
+---
+
+## Order Status Lifecycle
+
+```text
+PROPOSED -> CONFIRMED -> SUBMITTED -> ACCEPTED -> FILLED
+                                   \-> PARTIALLY_FILLED -> FILLED
+                                   \-> REJECTED / CANCELED
+                                   \-> UNKNOWN (requires reconciliation, no retry)
+```
 
 ---
 
@@ -42,190 +212,65 @@ The architecture is intentionally modular so new strategies can be added without
 - Streamlit - multipage web interface
 - Pandas / NumPy - data processing and simulation
 - Plotly - interactive charts
-- alpaca-py - market data and paper account API
+- alpaca-py - market data and paper trading API
 - SQLite - local persistence
 - pytest - automated testing
 
 ---
 
-## Architecture
-
-```text
-Alpaca API
-    |
-    v
-Market Data (data/alpaca_data.py)
-    |
-    v
-Strategy (strategies/)
-    |
-    v
-Backtest Engine (backtesting/engine.py)
-    |
-    v
-Metrics (backtesting/metrics.py)
-    |
-    v
-Streamlit UI (views/ + ui/)
-    |
-    v
-SQLite DB (storage/trading_app.db)
-```
-
-### Design principles
-
-- Strategy-agnostic engine - any class implementing BaseStrategy can be backtested
-- Paper-only by default - TRADING_MODE = "paper" with no live trading toggle
-- No hardcoded credentials - keys loaded from environment variables
-- Separation of concerns - business logic lives outside Streamlit view files
-
----
-
-## Project Structure
-
-```text
-quant_trading_app/
-|-- app.py                  # Streamlit entry point
-|-- config/settings.py      # Application configuration
-|-- core/                   # Models and exceptions
-|-- data/                   # Alpaca data provider + SQLite manager
-|-- strategies/             # Strategy implementations
-|-- backtesting/            # Engine and performance metrics
-|-- broker/                 # Read-only Alpaca paper account client
-|-- ui/                     # Reusable charts and UI components
-|-- views/                  # Streamlit pages
-|-- storage/                # Local database (gitignored)
-+-- tests/                  # pytest test suite
-```
-
----
-
 ## Getting Started
-
-### Prerequisites
-
-- Python 3.12 or newer
-- An Alpaca paper trading account (free): https://alpaca.markets/
-- Git
-
-### 1. Clone the repository
 
 ```powershell
 git clone https://github.com/Pd-Patel-dev/quant_trading_app.git
 cd quant_trading_app
-```
-
-### 2. Create a virtual environment
-
-```powershell
 py -3.12 -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-```
-
-If `py -3.12` is unavailable, substitute your installed version (for example `py -3.13`).
-
-### 3. Configure environment variables
-
-```powershell
 Copy-Item .env.example .env
 ```
 
-Edit `.env` and add your Alpaca paper credentials:
-
-```env
-ALPACA_API_KEY=your_paper_api_key
-ALPACA_SECRET_KEY=your_paper_secret_key
-```
-
-Obtain keys from the Alpaca dashboard under Paper Trading > API Keys.
-
-Never commit `.env` or share your secret key.
-
-### 4. Run the application
+Add Alpaca paper credentials to `.env`, then:
 
 ```powershell
 streamlit run app.py
+pytest -v
+python scripts/check_paper_trading_readiness.py
+python -m workers.automation_readiness
 ```
 
-Open http://localhost:8501 in your browser.
+---
+
+## Paper Trading Limitations
+
+- Paper trading is a simulation. Simulated fills and performance may differ from live trading because of liquidity, latency, market impact, slippage, queue position, and other real-market conditions.
+- Live trading is permanently disabled in this application
+- Automated submission is disabled by default; kill switch engaged by default
+- No short selling, leverage, fractional shares, options, or crypto
+- Manual confirmation required for manual order proposals
+- Automated proposals use policy-based validation at market open (never manually confirmed)
+- Unknown order status blocks new submissions until reconciled
 
 ---
 
-## Usage
+## Safety Configuration
 
-### Run a backtest
-
-1. Navigate to Research > Run Backtest
-2. Enter a ticker (default: SPY), date range, and capital settings
-3. Adjust moving-average windows, commission, slippage, and cash reserve
-4. Click Run Backtest
-5. Review metrics, charts, trade history, and download CSV exports
-
-### View paper account
-
-1. Navigate to Trading > Paper Account
-2. Click Test Paper Connection
-3. Review cash, portfolio value, buying power, and account status
-
-Order submission is disabled in Milestone 1.
-
-### Run tests
-
-```powershell
-pytest
+```python
+TRADING_MODE = "paper"
+LIVE_TRADING_ENABLED = False
+PAPER_ORDER_SUBMISSION_ENABLED = True
+MANUAL_ORDER_CONFIRMATION_REQUIRED = True
+MAX_PAPER_ORDER_NOTIONAL = 500.0
+AUTOMATED_PAPER_TRADING_ENABLED = False
+AUTOMATION_KILL_SWITCH_ENGAGED = True
+MAX_AUTOMATED_ORDER_NOTIONAL = 500.0
+MAX_AUTOMATED_ORDERS_PER_DAY = 3
+MAX_AUTOMATED_DAILY_NOTIONAL = 1_000.0
+MAX_ACTIVE_MANAGED_POSITIONS = 3
 ```
-
-All tests use synthetic data and do not require Alpaca credentials.
-
----
-
-## Backtesting Assumptions
-
-The Milestone 1 engine models a conservative long-only workflow:
-
-- One symbol, one open position at a time
-- Whole shares only (no fractional shares)
-- Signals execute at the next day's open (reduces look-ahead bias)
-- Slippage works against the trader (higher buy price, lower sell price)
-- Commission charged per executed order
-- Cash reserve held back from each purchase
-- Unallocated capital remains idle but counts toward portfolio value
-- Open positions are not force-closed at the end of the backtest
-
----
-
-## Safety and Limitations
-
-| Rule | Status |
-|------|--------|
-| Live trading | Disabled |
-| Order submission | Disabled (Milestone 1) |
-| Credential storage | Environment variables only |
-| Secret key in UI/logs | Never displayed |
-| Backtest guarantees | None - past performance does not guarantee future results |
-
-Alpaca free-tier accounts use the IEX data feed. Bars may differ slightly from premium SIP data.
-
----
-
-## Roadmap
-
-- [ ] Additional strategies via BaseStrategy
-- [ ] Portfolio fund allocation across strategies
-- [ ] Paper order submission and tracking
-- [ ] Strategy-level and combined portfolio performance
-- [ ] Live trading (only with explicit safeguards - not planned for near-term releases)
 
 ---
 
 ## Disclaimer
 
-This software is for educational and research purposes only. Algorithmic trading involves substantial risk of loss. Backtesting and paper trading cannot predict future market behavior. The authors are not responsible for any financial losses incurred through use of this software.
-
----
-
-## License
-
-This project is provided as-is for personal and educational use.
+This software is for educational and research purposes only. Algorithmic trading involves substantial risk of loss. Past backtest or paper results do not guarantee future performance.

@@ -23,3 +23,19 @@ class BacktestError(QuantTradingError):
 
 class AlpacaConnectionError(QuantTradingError):
     """Raised when Alpaca API connectivity fails."""
+
+
+class AllocationError(QuantTradingError):
+    """Raised when strategy fund allocation rules are violated."""
+
+
+class LedgerError(QuantTradingError):
+    """Raised when ledger operations fail."""
+
+
+class OrderProposalError(QuantTradingError):
+    """Raised when order proposal generation or validation fails."""
+
+
+class PaperTradingError(QuantTradingError):
+    """Raised when paper trading workflow fails."""
