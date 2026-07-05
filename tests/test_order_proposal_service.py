@@ -11,12 +11,18 @@ from services.order_proposal_service import OrderProposalService
 from services.strategy_service import StrategyService
 
 
+from tests.conftest import create_approved_active_strategy, seed_backtest_for_approval
+
+
 def _strategy_and_eval(temp_db, *, paused: bool = False, local_qty: int = 0):
     service = StrategyService(temp_db)
-    strategy_id = service.create_strategy(
+    strategy_id = service.create_moving_average_strategy(
         "Prop Test", "SPY", 50, 200, Decimal("5000"), Decimal("0.05"),
-        EntryPolicy.WAIT_FOR_NEXT_CROSSOVER, activate=True,
+        EntryPolicy.WAIT_FOR_NEXT_CROSSOVER, activate=False,
     )
+    seed_backtest_for_approval(temp_db, "moving_average_crossover", "SPY")
+    temp_db.update_strategy_paper_approval(strategy_id, approved=True, approved_at="2026-01-01T00:00:00+00:00")
+    service.activate(strategy_id)
     if paused:
         service.pause(strategy_id)
     if local_qty:

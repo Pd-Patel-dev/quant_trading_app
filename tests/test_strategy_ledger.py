@@ -9,7 +9,7 @@ from services.strategy_service import StrategyService
 
 def _strategy_id(temp_db) -> int:
     service = StrategyService(temp_db)
-    return service.create_strategy(
+    return service.create_moving_average_strategy(
         "Ledger Test", "SPY", 50, 200, Decimal("5000"), Decimal("0.05"),
         EntryPolicy.WAIT_FOR_NEXT_CROSSOVER, activate=False,
     )

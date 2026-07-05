@@ -12,12 +12,11 @@ from services.paper_trading_service import PaperTradingService
 from services.strategy_service import StrategyService
 
 
+from tests.conftest import create_approved_active_strategy
+
+
 def _setup_confirmed_proposal(temp_db, mock_order_manager):
-    service = StrategyService(temp_db)
-    strategy_id = service.create_strategy(
-        "PT", "SPY", 50, 200, Decimal("5000"), Decimal("0.05"),
-        EntryPolicy.WAIT_FOR_NEXT_CROSSOVER, activate=True,
-    )
+    strategy_id = create_approved_active_strategy(temp_db, name="PT")
     from core.models import OrderProposal, SignalType
 
     proposal = OrderProposal(

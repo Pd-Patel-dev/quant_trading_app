@@ -7,6 +7,14 @@ import plotly.graph_objects as go
 
 from core.models import Trade
 
+__all__ = [
+    "drawdown_chart",
+    "equity_curve_chart",
+    "price_and_emas_chart",
+    "price_and_moving_averages_chart",
+    "strategy_vs_buy_hold_chart",
+]
+
 
 def price_and_moving_averages_chart(
     processed_data: pd.DataFrame,
@@ -78,6 +86,17 @@ def price_and_moving_averages_chart(
         height=500,
     )
     return figure
+
+
+def price_and_emas_chart(
+    processed_data: pd.DataFrame,
+    trades: list[Trade],
+    equity_curve: pd.DataFrame | None = None,
+) -> go.Figure:
+    """Plot crypto EMA trend strategy (delegates to ui.crypto_ema_chart)."""
+    from ui.crypto_ema_chart import price_and_emas_chart as _render
+
+    return _render(processed_data, trades, equity_curve)
 
 
 def equity_curve_chart(equity_curve: pd.DataFrame, starting_capital: float) -> go.Figure:

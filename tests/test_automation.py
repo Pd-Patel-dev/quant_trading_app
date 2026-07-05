@@ -29,22 +29,15 @@ def _automation_service(temp_db, mock_order_manager) -> AutomationService:
     return AutomationService(temp_db, mock_order_manager, None)
 
 
+from tests.conftest import create_approved_active_strategy
+
+
 def _active_strategy(temp_db) -> int:
-    service = StrategyService(temp_db)
-    return service.create_strategy(
-        "AutoTest",
-        "SPY",
-        50,
-        200,
-        Decimal("5000"),
-        Decimal("0.05"),
-        EntryPolicy.WAIT_FOR_NEXT_CROSSOVER,
-        activate=True,
-    )
+    return create_approved_active_strategy(temp_db)
 
 
 def test_schema_version_three(temp_db) -> None:
-    assert temp_db.schema_version >= 3
+    assert temp_db.schema_version >= 4
     settings = temp_db.get_automation_settings()
     assert settings.automated_paper_trading_enabled is False
     assert settings.kill_switch_engaged is True

@@ -11,6 +11,7 @@ from typing import Any, Literal
 import pandas as pd
 
 from core.exceptions import ConfigurationError
+from market_data.models import QuantityMode
 
 
 class SignalType(str, Enum):
@@ -28,6 +29,7 @@ class StrategyStatus(str, Enum):
     ACTIVE = "ACTIVE"
     PAUSED = "PAUSED"
     STOPPED = "STOPPED"
+    ARCHIVED = "ARCHIVED"
 
 
 class EntryPolicy(str, Enum):
@@ -73,13 +75,14 @@ class Trade:
     timestamp: datetime
     symbol: str
     side: Literal["BUY", "SELL"]
-    quantity: int
+    quantity: int | float
     execution_price: float
     gross_value: float
     commission: float
     cash_after_trade: float
-    position_after_trade: int
+    position_after_trade: int | float
     reason: str
+    signal_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +97,10 @@ class BacktestConfiguration:
     commission: float
     slippage_percent: float
     cash_reserve_percent: float
+    quantity_mode: QuantityMode = QuantityMode.WHOLE_UNITS
+    quantity_precision: int = 8
+    crypto_fee_percent: float = 0.0
+    max_order_notional: float | None = None
 
     def __post_init__(self) -> None:
         if self.starting_capital <= 0:
@@ -133,6 +140,7 @@ class BacktestResult:
     equity_curve: pd.DataFrame
     processed_data: pd.DataFrame
     trades: list[Trade] = field(default_factory=list)
+    extended_metrics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -153,9 +161,18 @@ class StrategyRecord:
     updated_at: str
     activated_at: str | None = None
     paused_at: str | None = None
+    stopped_at: str | None = None
+    archived_at: str | None = None
+    deactivated_reason: str | None = None
     automation_enabled: bool = False
     automation_approved_at: str | None = None
     automation_paused_reason: str | None = None
+    paper_trading_approved: bool = False
+    paper_trading_approved_at: str | None = None
+    asset_type: str = "STOCK"
+    quote_currency: str | None = None
+    crypto_paper_trading_approved: bool = False
+    crypto_paper_trading_approved_at: str | None = None
 
 
 @dataclass
@@ -246,6 +263,16 @@ class StrategyLedgerSummary:
 
 
 @dataclass
+class CryptoConfirmationData:
+    """User confirmation inputs for a crypto paper order proposal."""
+
+    paper_text: str
+    paper_trading_acknowledged: bool
+    details_reviewed: bool
+    continuous_market_acknowledged: bool
+
+
+@dataclass
 class ConfirmationData:
     """User confirmation inputs for a paper order proposal."""
 
@@ -282,6 +309,17 @@ class PaperOrderRecord:
     last_processed_filled_qty: int = 0
     submission_source: str = "MANUAL"
     automation_run_id: str | None = None
+
+
+@dataclass(frozen=True)
+class StrategyDeletionEligibility:
+    """Result of checking whether a strategy may be permanently deleted."""
+
+    can_delete: bool
+    strategy_id: int
+    blocking_reasons: list[str]
+    related_counts: dict[str, int]
+    recommended_action: str
 
 
 def decimal_to_float(value: Decimal | None) -> float:

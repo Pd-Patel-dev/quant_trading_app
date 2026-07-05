@@ -1,5 +1,5 @@
 """UI helper package."""
 
-from ui import charts, components
+from . import charts, components
 
 __all__ = ["charts", "components"]

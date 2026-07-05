@@ -2,7 +2,7 @@
 
 A modular Python application for researching algorithmic trading strategies. Quant Strategy Lab connects to Alpaca for historical market data and paper account access, runs backtests with realistic execution assumptions, and supports manual paper-order workflows with strategy-level virtual fund allocation.
 
-**Current release:** Milestone 3 - Automated Daily Paper Trading Workflow  
+**Current release:** Milestone 8 - Crypto Daily EMA Trend Following  
 **Trading mode:** Paper only (live trading disabled)
 
 ---
@@ -27,7 +27,7 @@ The architecture is intentionally modular so new strategies can be added without
 
 | Area | Capability |
 |------|------------|
-| Strategy management | Create, draft, activate, pause, resume, and stop MA crossover strategies |
+| Strategy management | Create, draft, activate, pause, resume, stop, archive, restore, and permanently delete unused drafts |
 | Virtual allocation | Local paper capital pool with per-strategy fund allocation |
 | Signal evaluation | Daily completed-bar signal evaluation with entry policies |
 | Order proposals | Risk-validated BUY/SELL proposals (not auto-submitted) |
@@ -40,6 +40,121 @@ The architecture is intentionally modular so new strategies can be added without
 | **Automation (M3)** | One-shot CLI workers for after-close evaluation, market-open execution, order sync, and reconciliation |
 | **Kill switch** | Global emergency block on automated submissions (engaged by default) |
 | **Audit log** | Append-only record of every automation event |
+| **Strategy Lab (M4)** | Registry-based multi-strategy research, comparison, train/test, walk-forward, portfolio simulation |
+| **RSI Mean Reversion** | Second strategy plugin (manual paper only; automation disabled) |
+
+---
+
+## Milestone 4 — Multi-Strategy Research Lab
+
+### Strategy Plugin Architecture
+
+```text
+Create strategy class
+    ↓
+Define metadata and parameters
+    ↓
+Register strategy
+    ↓
+Write unit tests
+    ↓
+Run historical backtest
+    ↓
+Run train/test evaluation
+    ↓
+Run walk-forward evaluation
+    ↓
+Approve for paper trading
+    ↓
+Observe paper performance
+```
+
+Registered strategies:
+
+| Type | Category | Automation |
+|------|----------|------------|
+| `moving_average_crossover` | TREND_FOLLOWING | Supported |
+| `rsi_mean_reversion` | MEAN_REVERSION | Disabled |
+
+Add a new strategy by implementing `BaseStrategy`, defining `StrategyMetadata`, registering in `strategies/registry.py`, and adding tests.
+
+### RSI Mean Reversion Rules
+
+- **BUY:** Previous RSI ≤ oversold threshold AND current RSI > oversold threshold, from cash
+- **SELL:** Previous RSI < exit threshold AND current RSI ≥ exit threshold, from long
+- Long-only; overbought threshold is research-only (no shorts)
+- Wilder-style RSI calculated with Pandas (no TA-Lib)
+
+### Trend Following vs Mean Reversion
+
+Moving-average crossover follows trends; RSI mean reversion buys oversold recoveries and exits at a recovery threshold.
+
+### Research vs Paper Trading
+
+**Strategy Lab** results are labeled **Research Simulation**. They never write to the paper ledger or submit orders. **Paper Brokerage Account** values remain separate.
+
+### Paper Trading Approval
+
+New strategies default to `DRAFT`, `paper_trading_approved = False`, `automation_enabled = False`. To approve:
+
+1. Complete at least one backtest for the same strategy type, symbol, and parameters
+2. Check all approval boxes on the Strategies page
+3. Type exactly: `APPROVE PAPER STRATEGY`
+
+Approval does not activate the strategy. RSI automated trading remains disabled.
+
+### Strategy Status Lifecycle
+
+```text
+DRAFT → ACTIVE ↔ PAUSED → STOPPED
+              ↓              ↓
+           ARCHIVED ←────────┘
+              ↓
+           DRAFT (restore)
+```
+
+| Status | Meaning |
+|--------|---------|
+| **DRAFT** | Configured but not trading. May be edited, approved, activated, stopped, archived, or permanently deleted if unused. |
+| **ACTIVE** | Approved and eligible for paper trading and automation (when separately enabled). Only one ACTIVE strategy per asset type and symbol. |
+| **PAUSED** | Temporarily halted. Existing positions and open orders remain. Order sync and fill processing continue. No new proposals or automated submissions. |
+| **STOPPED** | Permanently disabled until restored via archive workflow. Positions and history preserved. Does not liquidate. |
+| **ARCHIVED** | Hidden from normal selectors. All financial history preserved. Restore as DRAFT to reconfigure. |
+
+**Pause**
+- Stops new trading decisions
+- Keeps positions and history
+- Can be resumed
+
+**Stop**
+- Permanently disables future activity
+- Keeps positions and history
+- Does not liquidate
+
+**Archive**
+- Hides the strategy from normal management
+- Preserves all financial history
+
+**Delete**
+- Available only for unused drafts (no signals, orders, trading ledger entries, etc.)
+- Permanently removes the strategy definition
+- If deletion is blocked, archive instead
+
+Pausing or stopping a strategy with an open position does **not** close the position or cancel submitted orders. A paused strategy with a pending order continues to synchronize with Alpaca.
+
+Restoring an archived strategy returns it to **DRAFT** with automation and approvals reset — you must approve and activate again before trading.
+
+### Troubleshooting Deletion Failures
+
+Permanent delete is blocked when related history exists (signals, proposals, orders, non-allocation ledger entries, positions, audit records). The Strategies page lists each blocking reason. Use **Archive** instead to retain history.
+
+Validate lifecycle health:
+
+```powershell
+python scripts/check_strategy_management.py
+```
+
+Historical backtests and paper trading are simulations. They do not guarantee future profits or reproduce every live-market condition.
 
 ---
 
@@ -166,15 +281,34 @@ Paper trading is a simulation. Simulated fills and performance can differ from l
 
 ---
 
-## Strategy Allocation and Local Ledger
+## Strategy Allocation and Paper Capital
 
-Alpaca maintains positions at the **account level**, not per strategy. Quant Strategy Lab maintains its own **local strategy ledger**:
+**Orders always submit to your Alpaca paper account** when credentials are configured. The app also maintains a **local per-strategy ledger** in SQLite to track each strategy's slice of capital, positions, and cash.
 
-- Each strategy has a virtual allocation from the local paper capital pool
-- Cash, reserves, buys, sells, and commissions are recorded as append-only ledger entries
-- Strategy positions are tracked locally in SQLite
-- Only one active strategy may trade a given symbol
-- Alpaca buying power is used only as an additional broker-level validation
+### Capital source (default: Alpaca)
+
+| Setting | Meaning |
+|---------|---------|
+| `PAPER_CAPITAL_SOURCE=alpaca` | Strategy allocation limits use **Alpaca paper account cash** (recommended) |
+| `PAPER_CAPITAL_SOURCE=local` | Use the offline virtual pool (`LOCAL_PAPER_CAPITAL_POOL`, default $100,000) |
+
+When Alpaca credentials are present, `alpaca` is the default. Add to `.env`:
+
+```text
+PAPER_CAPITAL_SOURCE=alpaca
+ALPACA_API_KEY=your_paper_api_key
+ALPACA_SECRET_KEY=your_paper_secret_key
+```
+
+The Strategies page shows **Capital source: Alpaca paper account cash** and how much is still available to assign across strategies.
+
+Alpaca maintains positions at the **account level**, not per strategy. Quant Strategy Lab:
+
+- Assigns each strategy a virtual allocation (cannot exceed Alpaca cash when using Alpaca capital source)
+- Records cash, reserves, buys, sells, and commissions as append-only ledger entries
+- Tracks strategy positions locally in SQLite
+- Enforces only one **ACTIVE** strategy per asset/symbol
+- Validates Alpaca buying power before order submission
 
 Corrections are made via new ledger adjustment entries. Existing ledger rows are never deleted.
 
@@ -237,6 +371,220 @@ streamlit run app.py
 pytest -v
 python scripts/check_paper_trading_readiness.py
 python -m workers.automation_readiness
+python -m workers.refresh_historical_data
+```
+
+---
+
+## Milestone 5 — Multi-Asset Market Data Warehouse
+
+### Architecture
+
+```text
+Enter symbol
+    ↓
+Normalize symbol
+    ↓
+Search local database
+    ↓
+Find missing history
+    ↓
+Download missing ranges
+    ↓
+Validate and store bars
+    ↓
+Load complete cached dataset
+    ↓
+Run backtest
+```
+
+### Asset types
+
+| Type | Alpaca client | Symbol format | Research backtest |
+|------|---------------|---------------|-------------------|
+| `STOCK` | `StockHistoricalDataClient` | `AAPL`, `BRK.B` | Yes |
+| `CRYPTO` | `CryptoHistoricalDataClient` | `BTC/USD`, `ETH/USD` | Yes (research only) |
+
+**Warning:** Crypto functionality in this milestone is for historical research and backtesting only. It does not enable crypto order submission.
+
+### Local historical-data cache
+
+- SQLite is the source of truth after synchronization
+- Missing ranges are detected and downloaded incrementally from Alpaca
+- Upserts prevent duplicate bars (`INSERT ... ON CONFLICT DO UPDATE`)
+- Data-quality validation runs before persistence
+- Force refresh re-downloads the complete requested interval
+- Recent overlap refresh: 5 stock sessions / 5 crypto UTC days
+
+### Multi-symbol backtesting
+
+- **Independent comparison:** Same starting capital per symbol
+- **Shared-capital portfolio:** Allocations across assets with unallocated cash preserved
+- **Calendar alignment:** Union of stock and crypto dates with forward-fill for combined portfolios
+
+### Fractional crypto research
+
+```python
+QuantityMode.WHOLE_UNITS          # Stocks (default)
+QuantityMode.FRACTIONAL_RESEARCH  # Crypto backtests (8 decimal places, Decimal math)
+```
+
+Fractional crypto research never reaches paper-trading or order-submission services.
+
+### Streamlit pages
+
+| Navigation | Page |
+|------------|------|
+| Data → Market Data | Download, cache inspector, coverage, quality issues |
+| Research → Multi-Asset Lab | Batch backtest, compare assets, shared portfolio |
+
+### Historical-data refresh worker
+
+```powershell
+python -m workers.refresh_historical_data
+```
+
+Uses worker lock `historical-data-refresh`. Refreshes active strategy symbols and optional watchlist. Never submits orders.
+
+### Database tables (schema v5)
+
+- `assets`, `market_bars`, `market_data_coverage`
+- `market_data_download_runs`, `market_data_quality_issues`
+- `multi_asset_backtest_runs`, `multi_asset_backtest_results`
+
+### Configuration limits
+
+```python
+MAX_SYMBOLS_PER_BATCH = 20
+MAX_BACKTEST_YEARS = 15
+MAX_DATABASE_EXPORT_ROWS = 500_000
+RECENT_STOCK_REFRESH_SESSIONS = 5
+RECENT_CRYPTO_REFRESH_DAYS = 5
+```
+
+### Troubleshooting missing data
+
+1. Check **Data → Market Data → Download History** for failed runs
+2. Verify symbol format (`BTC/USD` not ambiguous concatenations)
+3. Use **Repair internal gaps** for crypto daily sequences
+4. Use **Force refresh** if provider revised recent bars
+5. Confirm Alpaca credentials for stock downloads
+
+---
+
+## Milestone 6 — Crypto Paper Trading (Manual Only)
+
+### Staged rollout defaults
+
+```python
+CRYPTO_PAPER_TRADING_ENABLED = False
+CRYPTO_AUTOMATION_ENABLED = False
+CRYPTO_KILL_SWITCH_ENGAGED = True
+TRADING_MODE = "paper"
+LIVE_TRADING_ENABLED = False
+```
+
+Crypto paper trading is **manual confirmation only** in this milestone. No crypto automation workers submit orders.
+
+### Workflow
+
+```text
+Crypto strategy
+    ↓
+Completed crypto market data
+    ↓
+BUY, SELL, or HOLD signal
+    ↓
+Asset and allocation validation
+    ↓
+Crypto order proposal
+    ↓
+Manual PAPER CRYPTO confirmation
+    ↓
+Alpaca paper order
+    ↓
+Order synchronization
+    ↓
+Fee processing
+    ↓
+Crypto ledger and position update
+```
+
+### Order behavior
+
+| Side | Sizing | Time-in-force |
+|------|--------|---------------|
+| BUY | USD notional | GTC |
+| SELL | Base quantity (fractional) | GTC |
+
+Only **USD-quoted** pairs are supported for order submission (`BTC/USD`, etc.). Pairs are discovered from Alpaca's Assets API — not hardcoded.
+
+### Confirmation
+
+Requires checkboxes plus exact text: `PAPER CRYPTO`
+
+Crypto strategy approval requires: `APPROVE CRYPTO PAPER STRATEGY`
+
+### Readiness check
+
+```powershell
+python scripts/check_crypto_paper_readiness.py
+```
+
+### Warning
+
+Crypto paper trading is simulated. Paper fills, fees, liquidity, spread, latency, and price movement may differ from live cryptocurrency trading. Cryptocurrency prices can change rapidly and trading may result in substantial losses.
+
+---
+
+## Milestone 8 — Crypto Daily EMA Trend Following
+
+Strategy type: `crypto_ema_trend_following`  
+Supported pairs: **BTC/USD**, **ETH/USD** (daily candles only)
+
+### Logic flow
+
+```text
+Completed daily crypto candle
+    ↓
+Calculate EMA Fast, Medium, and Long
+    ↓
+Detect bullish or bearish crossover
+    ↓
+Apply Long EMA market filter
+    ↓
+Calculate risk-based position size
+    ↓
+Execute at next daily Open
+    ↓
+Track actual entry price
+    ↓
+Calculate 8% stop level
+    ↓
+Exit after bearish crossover or stop-loss
+```
+
+### Rules
+
+| Element | Default |
+|---------|---------|
+| Fast / Medium / Long EMA | 20 / 50 / 200 |
+| Stop-loss | 8% from **actual entry fill** (daily close evaluation) |
+| Risk per trade | 1% of strategy equity |
+| Minimum history | 250 completed daily bars |
+
+**BUY:** Fast EMA crosses above Medium EMA while Close is above Long EMA (flat only).  
+**SELL:** Bearish EMA crossover or daily close-based stop (stop has priority).  
+**Sizing:** `risk_budget = equity × 1%`, `notional = risk_budget ÷ 8%`, capped by cash, reserve, allocation, and order limits.
+
+### Warning
+
+This strategy is not guaranteed to be profitable. Crypto markets are highly volatile, and trend-following strategies can experience repeated losses during sideways conditions. The daily stop-loss does not guarantee an exit exactly 8% below entry because execution occurs at the next available daily Open.
+
+### Health check
+
+```powershell
+python scripts/check_crypto_ema_strategy.py
 ```
 
 ---
@@ -246,7 +594,7 @@ python -m workers.automation_readiness
 - Paper trading is a simulation. Simulated fills and performance may differ from live trading because of liquidity, latency, market impact, slippage, queue position, and other real-market conditions.
 - Live trading is permanently disabled in this application
 - Automated submission is disabled by default; kill switch engaged by default
-- No short selling, leverage, fractional shares, options, or crypto
+- No short selling, leverage, fractional shares, options, or crypto **order submission**
 - Manual confirmation required for manual order proposals
 - Automated proposals use policy-based validation at market open (never manually confirmed)
 - Unknown order status blocks new submissions until reconciled

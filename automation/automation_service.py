@@ -12,6 +12,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from automation.audit_service import AuditService
+from automation.safety_service import AutomationSafetyService
 from automation.models import (
     AuditEventType,
     AuditSeverity,
@@ -21,7 +22,7 @@ from automation.models import (
     ProposalSource,
     WorkerRunResult,
 )
-from automation.safety_service import AutomationSafetyService
+from portfolio.allocation_manager import AllocationManager
 from automation.worker_lock import WorkerLock
 from config.settings import Settings, get_settings
 from core.client_order_id import build_client_order_id
@@ -39,6 +40,8 @@ from portfolio.ledger import StrategyLedger
 from services.order_proposal_service import OrderProposalService
 from services.paper_trading_service import PaperTradingService
 from services.signal_service import SignalService
+
+from strategies.registry import get_registry
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +76,7 @@ class AutomationService:
         self._proposal_service = OrderProposalService(database, order_manager, self._settings)
         self._paper = PaperTradingService(database, order_manager, data_provider, self._settings)
         self._ledger = StrategyLedger(database)
+        self._registry = get_registry()
         self._tz = ZoneInfo(self._settings.market_timezone)
 
     def run_after_close_evaluation(self) -> WorkerRunResult:
@@ -132,6 +136,9 @@ class AutomationService:
             raise ValueError("Global automation must be enabled first.")
         if strategy.status != StrategyStatus.ACTIVE:
             raise ValueError("Strategy must be active.")
+        meta = self._registry.get_metadata(strategy.strategy_type)
+        if not meta.supports_automated_paper_trading:
+            raise ValueError("This strategy type does not support automated paper trading.")
         if self._db.count_unknown_orders() > 0:
             raise ValueError("Unknown orders must be resolved first.")
         self._db.update_strategy_automation(
@@ -192,11 +199,12 @@ class AutomationService:
             checks.append(("Market clock accessible", False, "Order manager not configured"))
 
         total_alloc = float(self._db.get_total_allocated_funds())
+        capital_pool = float(AllocationManager(self._db, settings).capital_pool)
         checks.append(
             (
-                "Local allocations valid",
-                total_alloc <= settings.local_paper_capital_pool,
-                f"Allocations ({total_alloc}) exceed pool",
+                "Strategy allocations valid",
+                total_alloc <= capital_pool,
+                f"Allocations ({total_alloc}) exceed available capital ({capital_pool:.2f})",
             )
         )
 
@@ -327,7 +335,11 @@ class AutomationService:
             )
 
         auto_settings = self._db.get_automation_settings()
-        strategies = [s for s in self._db.list_strategies(StrategyStatus.ACTIVE) if s.strategy_type == "moving_average"]
+        strategies = [
+            s
+            for s in self._db.list_strategies(StrategyStatus.ACTIVE)
+            if s.strategy_type == "moving_average_crossover"
+        ]
         signals = 0
         proposals = 0
         warnings = 0
@@ -645,10 +657,11 @@ class AutomationService:
             })
 
         total_alloc = float(self._db.get_total_allocated_funds())
-        if total_alloc > self._settings.local_paper_capital_pool:
+        pool = float(AllocationManager(self._db, self._settings).capital_pool)
+        if total_alloc > pool:
             warnings.append({
                 "type": "ALLOCATION_EXCEEDS_POOL",
-                "message": f"Total allocations ({total_alloc}) exceed configured pool.",
+                "message": f"Total allocations ({total_alloc}) exceed available capital ({pool:.2f}).",
             })
 
         for strategy in self._db.list_strategies():
@@ -683,6 +696,10 @@ class AutomationService:
             eligible = False
         if not strategy.automation_enabled:
             blocking.append("Strategy automation is not enabled.")
+            eligible = False
+        meta = self._registry.get_metadata(strategy.strategy_type)
+        if not meta.supports_automated_paper_trading:
+            blocking.append("Automated trading is not supported for this strategy type.")
             eligible = False
         if not auto_settings.automated_paper_trading_enabled:
             blocking.append("Global automation is disabled.")

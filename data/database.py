@@ -27,11 +27,21 @@ from core.models import (
 )
 from data.migrations import apply_migrations
 from data.automation_database import AutomationDatabaseMixin
+from data.crypto_database import CryptoDatabaseMixin
+from data.market_data_database import MarketDataDatabaseMixin
+from data.research_database import ResearchDatabaseMixin
+from data.strategy_lifecycle_database import StrategyLifecycleDatabaseMixin
 
 logger = logging.getLogger(__name__)
 
 
-class DatabaseManager(AutomationDatabaseMixin):
+class DatabaseManager(
+    AutomationDatabaseMixin,
+    ResearchDatabaseMixin,
+    MarketDataDatabaseMixin,
+    CryptoDatabaseMixin,
+    StrategyLifecycleDatabaseMixin,
+):
     """Manage SQLite connections, schema, and persistence."""
 
     def __init__(self, database_path: str | Path) -> None:
@@ -46,10 +56,12 @@ class DatabaseManager(AutomationDatabaseMixin):
     @contextmanager
     def connect(self) -> Generator[sqlite3.Connection, None, None]:
         """Open a SQLite connection with foreign keys enabled."""
-        connection = sqlite3.connect(self._database_path)
+        connection = sqlite3.connect(self._database_path, timeout=30.0)
         connection.row_factory = sqlite3.Row
         try:
             connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA busy_timeout = 30000")
             yield connection
             connection.commit()
         except Exception:
@@ -162,16 +174,16 @@ class DatabaseManager(AutomationDatabaseMixin):
             ).fetchone()
         return _row_to_strategy(row) if row else None
 
-    def list_strategies(self, status: StrategyStatus | None = None) -> list[StrategyRecord]:
-        with self.connect() as connection:
-            if status:
-                rows = connection.execute(
-                    "SELECT * FROM strategies WHERE status = ? ORDER BY id",
-                    (status.value,),
-                ).fetchall()
-            else:
-                rows = connection.execute("SELECT * FROM strategies ORDER BY id").fetchall()
-        return [_row_to_strategy(row) for row in rows]
+    def list_strategies(
+        self,
+        status: StrategyStatus | None = None,
+        *,
+        include_archived: bool = False,
+    ) -> list[StrategyRecord]:
+        return self.list_strategies_filtered(
+            status=status,
+            include_archived=include_archived,
+        )
 
     def update_strategy(
         self,
@@ -237,17 +249,18 @@ class DatabaseManager(AutomationDatabaseMixin):
                 ),
             )
 
-    def get_active_strategy_for_symbol(self, symbol: str) -> StrategyRecord | None:
-        with self.connect() as connection:
-            row = connection.execute(
-                """
-                SELECT * FROM strategies
-                WHERE symbol = ? AND status = 'ACTIVE' AND is_active = 1
-                LIMIT 1
-                """,
-                (symbol.upper(),),
-            ).fetchone()
-        return _row_to_strategy(row) if row else None
+    def get_active_strategy_for_symbol(
+        self,
+        symbol: str,
+        asset_type: str = "STOCK",
+        *,
+        exclude_strategy_id: int | None = None,
+    ) -> StrategyRecord | None:
+        return self.get_active_strategy_for_asset_symbol(
+            asset_type,
+            symbol,
+            exclude_strategy_id=exclude_strategy_id,
+        )
 
     def count_strategies_by_status(self) -> dict[str, int]:
         with self.connect() as connection:
@@ -581,6 +594,13 @@ class DatabaseManager(AutomationDatabaseMixin):
             "raw_status",
             "last_synced_at",
             "last_processed_filled_qty",
+            "filled_quantity_text",
+            "filled_average_price_text",
+            "last_processed_filled_quantity_text",
+            "fee_amount_text",
+            "fee_currency",
+            "fee_status",
+            "last_processed_fee_amount_text",
         }
         updates = {key: value for key, value in fields.items() if key in allowed}
         if not updates:
@@ -667,9 +687,18 @@ def _row_to_strategy(row: sqlite3.Row) -> StrategyRecord:
         updated_at=row["updated_at"],
         activated_at=row["activated_at"],
         paused_at=row["paused_at"],
+        stopped_at=row["stopped_at"] if "stopped_at" in keys else None,
+        archived_at=row["archived_at"] if "archived_at" in keys else None,
+        deactivated_reason=row["deactivated_reason"] if "deactivated_reason" in keys else None,
         automation_enabled=bool(row["automation_enabled"]) if "automation_enabled" in keys else False,
         automation_approved_at=row["automation_approved_at"] if "automation_approved_at" in keys else None,
         automation_paused_reason=row["automation_paused_reason"] if "automation_paused_reason" in keys else None,
+        paper_trading_approved=bool(row["paper_trading_approved"]) if "paper_trading_approved" in keys else False,
+        paper_trading_approved_at=row["paper_trading_approved_at"] if "paper_trading_approved_at" in keys else None,
+        asset_type=row["asset_type"] if "asset_type" in keys else "STOCK",
+        quote_currency=row["quote_currency"] if "quote_currency" in keys else None,
+        crypto_paper_trading_approved=bool(row["crypto_paper_trading_approved"]) if "crypto_paper_trading_approved" in keys else False,
+        crypto_paper_trading_approved_at=row["crypto_approved_at"] if "crypto_approved_at" in keys else None,
     )
 
 

@@ -66,6 +66,8 @@ class OrderProposalService:
             blocking.append("Alpaca credentials are not configured.")
         if strategy.status != StrategyStatus.ACTIVE:
             blocking.append(f"Strategy status is {strategy.status.value}.")
+        if not getattr(strategy, "paper_trading_approved", False):
+            blocking.append("Strategy is not approved for paper trading.")
         if not evaluation.is_actionable:
             blocking.append("Signal is not actionable.")
         if evaluation.latest_signal == SignalType.HOLD:
@@ -91,8 +93,12 @@ class OrderProposalService:
         if self._db.count_unknown_orders() > 0:
             blocking.append("An order with UNKNOWN status exists.")
 
-        active_for_symbol = self._db.get_active_strategy_for_symbol(strategy.symbol)
-        if active_for_symbol and active_for_symbol.id != strategy.id:
+        active_for_symbol = self._db.get_active_strategy_for_symbol(
+            strategy.symbol,
+            asset_type=getattr(strategy, "asset_type", "STOCK"),
+            exclude_strategy_id=strategy.id,
+        )
+        if active_for_symbol is not None:
             blocking.append(f"Another active strategy uses symbol {strategy.symbol}.")
 
         local_position = self._db.get_strategy_position(strategy.id, strategy.symbol)

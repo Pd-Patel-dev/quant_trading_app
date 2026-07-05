@@ -39,3 +39,19 @@ class OrderProposalError(QuantTradingError):
 
 class PaperTradingError(QuantTradingError):
     """Raised when paper trading workflow fails."""
+
+
+class StrategyNotFoundError(StrategyError):
+    """Raised when a strategy ID does not exist."""
+
+
+class InvalidStrategyTransitionError(StrategyError):
+    """Raised when a lifecycle transition is not allowed."""
+
+
+class StrategyDeletionBlockedError(StrategyError):
+    """Raised when permanent deletion is blocked by related history."""
+
+
+class ActiveSymbolConflictError(AllocationError):
+    """Raised when another active strategy owns the same asset and symbol."""

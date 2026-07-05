@@ -158,7 +158,10 @@ class PortfolioService:
             warnings.append("One or more orders remain in UNKNOWN status.")
 
         if self._allocation.get_total_allocated() > self._allocation.capital_pool:
-            warnings.append("Total allocated funds exceed the configured local paper capital pool.")
+            warnings.append(
+                f"Total allocated funds exceed the configured paper capital pool "
+                f"({self._allocation.capital_source_label})."
+            )
 
         active_symbols: dict[str, int] = {}
         for strategy in self._db.list_strategies():

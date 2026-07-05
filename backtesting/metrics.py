@@ -124,3 +124,121 @@ def compute_drawdown_series(equity_curve: pd.Series) -> pd.Series:
     running_max = equity_curve.cummax()
     drawdown = ((equity_curve / running_max) - 1.0) * 100.0
     return drawdown.fillna(0.0)
+
+
+def annualized_return_percent(
+    starting_value: float,
+    final_value: float,
+    calendar_days: int,
+) -> float:
+    """Annualize total return using calendar days."""
+    if starting_value <= 0 or calendar_days <= 0:
+        return 0.0
+    total_return = (final_value / starting_value) - 1.0
+    if calendar_days < 365:
+        return total_return * 100.0
+    years = calendar_days / 365.25
+    if years <= 0:
+        return 0.0
+    try:
+        ann = ((final_value / starting_value) ** (1.0 / years) - 1.0) * 100.0
+    except (OverflowError, ValueError):
+        return 0.0
+    if math.isnan(ann) or math.isinf(ann):
+        return 0.0
+    return float(ann)
+
+
+def sortino_ratio(daily_returns: pd.Series, risk_free_rate: float = 0.0) -> float:
+    """Sortino ratio using negative daily returns as downside risk."""
+    clean = daily_returns.dropna()
+    if len(clean) < 2:
+        return 0.0
+    excess = clean - (risk_free_rate / TRADING_DAYS_PER_YEAR)
+    downside = excess[excess < 0]
+    if len(downside) == 0:
+        return 0.0
+    downside_std = float(downside.std())
+    if downside_std == 0.0 or math.isnan(downside_std) or math.isinf(downside_std):
+        return 0.0
+    mean = float(excess.mean())
+    if math.isnan(mean) or math.isinf(mean):
+        return 0.0
+    value = (mean / downside_std) * math.sqrt(TRADING_DAYS_PER_YEAR)
+    if math.isnan(value) or math.isinf(value):
+        return 0.0
+    return float(value)
+
+
+def profit_factor(trades: list[Trade]) -> float:
+    """Gross profits divided by absolute gross losses."""
+    gross_profit = 0.0
+    gross_loss = 0.0
+    open_buy: Trade | None = None
+    for trade in trades:
+        if trade.side == "BUY":
+            open_buy = trade
+        elif trade.side == "SELL" and open_buy is not None:
+            buy_cost = open_buy.gross_value + open_buy.commission
+            sell_proceeds = trade.gross_value - trade.commission
+            net = sell_proceeds - buy_cost
+            if net > 0:
+                gross_profit += net
+            elif net < 0:
+                gross_loss += abs(net)
+            open_buy = None
+    if gross_loss == 0.0:
+        return gross_profit if gross_profit > 0 else 0.0
+    return gross_profit / gross_loss
+
+
+def average_trade_return_percent(trades: list[Trade]) -> float:
+    """Average net return percent across completed round trips."""
+    returns: list[float] = []
+    open_buy: Trade | None = None
+    for trade in trades:
+        if trade.side == "BUY":
+            open_buy = trade
+        elif trade.side == "SELL" and open_buy is not None:
+            buy_cost = open_buy.gross_value + open_buy.commission
+            sell_proceeds = trade.gross_value - trade.commission
+            if buy_cost > 0:
+                returns.append(((sell_proceeds - buy_cost) / buy_cost) * 100.0)
+            open_buy = None
+    if not returns:
+        return 0.0
+    return float(sum(returns) / len(returns))
+
+
+def average_holding_period_days(trades: list[Trade]) -> float:
+    """Average calendar days between paired BUY and SELL executions."""
+    periods: list[float] = []
+    open_buy: Trade | None = None
+    for trade in trades:
+        if trade.side == "BUY":
+            open_buy = trade
+        elif trade.side == "SELL" and open_buy is not None:
+            delta = (trade.timestamp - open_buy.timestamp).days
+            periods.append(float(max(delta, 0)))
+            open_buy = None
+    if not periods:
+        return 0.0
+    return float(sum(periods) / len(periods))
+
+
+def exposure_percent(position_quantities: pd.Series) -> float:
+    """Percentage of days with a long position."""
+    if position_quantities.empty:
+        return 0.0
+    long_days = int((position_quantities > 0).sum())
+    return (long_days / len(position_quantities)) * 100.0
+
+
+def normalized_equity_curve(equity_curve: pd.Series, base: float = 100.0) -> pd.Series:
+    """Normalize equity curve to start at a base value."""
+    if equity_curve.empty:
+        return equity_curve
+    start = float(equity_curve.iloc[0])
+    if start <= 0:
+        return equity_curve * 0.0 + base
+    return (equity_curve / start) * base

@@ -12,16 +12,51 @@ from core.models import BacktestConfiguration, SignalType
 from strategies.base_strategy import BaseStrategy
 
 
+from strategies.metadata import (
+    ParameterType,
+    StrategyCategory,
+    StrategyMetadata,
+    StrategyParameterDefinition,
+)
+
+
 class ScriptedStrategy(BaseStrategy):
     """Strategy that injects predetermined signals for deterministic tests."""
+
+    STRATEGY_TYPE = "scripted_test"
 
     def __init__(self, signals: list[str], name: str = "Scripted Strategy") -> None:
         self._signals = signals
         self._name = name
 
     @property
+    def metadata(self) -> StrategyMetadata:
+        return StrategyMetadata(
+            strategy_type=self.STRATEGY_TYPE,
+            display_name="Scripted",
+            description="Test strategy",
+            category=StrategyCategory.TREND_FOLLOWING,
+            version="1.0",
+            minimum_history_bars=1,
+            supported_timeframes=("1Day",),
+            supports_backtesting=True,
+            supports_manual_paper_trading=False,
+            supports_automated_paper_trading=False,
+            default_parameters={},
+            parameter_definitions=(),
+            risk_notes="Test only",
+        )
+
+    @property
     def name(self) -> str:
         return self._name
+
+    def validate_parameters(self) -> None:
+        return None
+
+    @classmethod
+    def from_parameters(cls, parameters: dict) -> ScriptedStrategy:
+        return cls(parameters.get("signals", []))
 
     def calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
         return data.copy()
@@ -32,6 +67,7 @@ class ScriptedStrategy(BaseStrategy):
         result["SMA_Long"] = result["Close"]
         result["Position"] = 0
         result["PositionChange"] = 0
+        result["SignalReason"] = None
         result["Signal"] = self._signals[: len(result)]
         return result
 

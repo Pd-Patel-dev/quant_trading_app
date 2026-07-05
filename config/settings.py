@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from decimal import Decimal
+
 from dotenv import load_dotenv
 
 APP_NAME = "Quant Strategy Lab"
@@ -29,10 +31,32 @@ DEFAULT_COMMISSION = 0.0
 DEFAULT_SLIPPAGE_PERCENT = 0.0005
 DEFAULT_CASH_RESERVE_PERCENT = 0.05
 LOCAL_PAPER_CAPITAL_POOL = 100_000.0
+PAPER_CAPITAL_SOURCE = "alpaca"
 PRICE_ESTIMATE_BUFFER_PERCENT = 0.005
 PROPOSAL_EXPIRY_HOURS = 24
 DATABASE_PATH = "storage/trading_app.db"
 CLIENT_ORDER_ID_PREFIX = "qslab"
+CRYPTO_PAPER_TRADING_ENABLED = False
+CRYPTO_AUTOMATION_ENABLED = False
+CRYPTO_KILL_SWITCH_ENGAGED = True
+MAX_CRYPTO_PAPER_ORDER_NOTIONAL = Decimal("100.00")
+MAX_CRYPTO_TOTAL_ALLOCATION = Decimal("1000.00")
+MAX_OPEN_CRYPTO_POSITIONS = 3
+CRYPTO_ESTIMATED_PRICE_BUFFER_PERCENT = Decimal("0.01")
+CRYPTO_DEFAULT_TIME_IN_FORCE = "gtc"
+CRYPTO_QUANTITY_PRECISION = 8
+CRYPTO_ESTIMATED_FEE_PERCENT = Decimal("0.001")
+CRYPTO_ASSET_CACHE_SECONDS = 300
+SUPPORTED_CRYPTO_QUOTE_CURRENCIES = ("USD",)
+MAX_SYMBOLS_PER_BATCH = 20
+MAX_BACKTEST_YEARS = 15
+MAX_DATABASE_EXPORT_ROWS = 500_000
+RECENT_STOCK_REFRESH_SESSIONS = 5
+RECENT_CRYPTO_REFRESH_DAYS = 5
+STOCK_DATA_FEED = "iex"
+STOCK_DATA_ADJUSTMENT = "split"
+CRYPTO_DATA_FEED = "us"
+RESEARCH_WATCHLIST_SYMBOLS = ""
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_PROJECT_ROOT / ".env")
@@ -83,9 +107,31 @@ class Settings:
     default_slippage_percent: float = DEFAULT_SLIPPAGE_PERCENT
     default_cash_reserve_percent: float = DEFAULT_CASH_RESERVE_PERCENT
     local_paper_capital_pool: float = LOCAL_PAPER_CAPITAL_POOL
+    paper_capital_source: str = PAPER_CAPITAL_SOURCE
     price_estimate_buffer_percent: float = PRICE_ESTIMATE_BUFFER_PERCENT
     proposal_expiry_hours: int = PROPOSAL_EXPIRY_HOURS
     client_order_id_prefix: str = CLIENT_ORDER_ID_PREFIX
+    max_symbols_per_batch: int = MAX_SYMBOLS_PER_BATCH
+    max_backtest_years: int = MAX_BACKTEST_YEARS
+    max_database_export_rows: int = MAX_DATABASE_EXPORT_ROWS
+    recent_stock_refresh_sessions: int = RECENT_STOCK_REFRESH_SESSIONS
+    recent_crypto_refresh_days: int = RECENT_CRYPTO_REFRESH_DAYS
+    stock_data_feed: str = STOCK_DATA_FEED
+    stock_data_adjustment: str = STOCK_DATA_ADJUSTMENT
+    crypto_data_feed: str = CRYPTO_DATA_FEED
+    research_watchlist_symbols: str = RESEARCH_WATCHLIST_SYMBOLS
+    crypto_paper_trading_enabled: bool = CRYPTO_PAPER_TRADING_ENABLED
+    crypto_automation_enabled: bool = CRYPTO_AUTOMATION_ENABLED
+    crypto_kill_switch_engaged: bool = CRYPTO_KILL_SWITCH_ENGAGED
+    max_crypto_paper_order_notional: Decimal = MAX_CRYPTO_PAPER_ORDER_NOTIONAL
+    max_crypto_total_allocation: Decimal = MAX_CRYPTO_TOTAL_ALLOCATION
+    max_open_crypto_positions: int = MAX_OPEN_CRYPTO_POSITIONS
+    crypto_estimated_price_buffer_percent: Decimal = CRYPTO_ESTIMATED_PRICE_BUFFER_PERCENT
+    crypto_default_time_in_force: str = CRYPTO_DEFAULT_TIME_IN_FORCE
+    crypto_quantity_precision: int = CRYPTO_QUANTITY_PRECISION
+    crypto_estimated_fee_percent: Decimal = CRYPTO_ESTIMATED_FEE_PERCENT
+    crypto_asset_cache_seconds: int = CRYPTO_ASSET_CACHE_SECONDS
+    supported_crypto_quote_currencies: tuple[str, ...] = SUPPORTED_CRYPTO_QUOTE_CURRENCIES
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "alpaca_api_key", os.getenv("ALPACA_API_KEY", "").strip())
@@ -119,6 +165,27 @@ class Settings:
             self,
             "max_active_managed_positions",
             _env_int("MAX_ACTIVE_MANAGED_POSITIONS", MAX_ACTIVE_MANAGED_POSITIONS),
+        )
+        object.__setattr__(
+            self,
+            "crypto_paper_trading_enabled",
+            _env_bool("CRYPTO_PAPER_TRADING_ENABLED", CRYPTO_PAPER_TRADING_ENABLED),
+        )
+        object.__setattr__(
+            self,
+            "crypto_kill_switch_engaged",
+            _env_bool("CRYPTO_KILL_SWITCH_ENGAGED", CRYPTO_KILL_SWITCH_ENGAGED),
+        )
+        source = os.getenv("PAPER_CAPITAL_SOURCE", "").strip().lower()
+        if not source:
+            source = "alpaca" if self.alpaca_configured else "local"
+        elif source not in {"alpaca", "local"}:
+            source = "local"
+        object.__setattr__(self, "paper_capital_source", source)
+        object.__setattr__(
+            self,
+            "local_paper_capital_pool",
+            _env_float("LOCAL_PAPER_CAPITAL_POOL", LOCAL_PAPER_CAPITAL_POOL),
         )
 
     @property

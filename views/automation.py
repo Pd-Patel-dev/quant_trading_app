@@ -18,7 +18,9 @@ from core.models import StrategyStatus
 from data.alpaca_data import AlpacaMarketDataProvider
 from data.database import DatabaseManager
 from portfolio.ledger import StrategyLedger
+from ui.automation_status import explain_strategy_automation
 from ui.components import format_currency, render_status_banner
+from strategies.registry import get_registry
 
 
 def _build_service(database: DatabaseManager) -> AutomationService:
@@ -62,6 +64,13 @@ def render(database: DatabaseManager) -> None:
 
     if status["kill_switch_engaged"]:
         st.error("Emergency kill switch is ENGAGED. Automated order submission is blocked.")
+
+    if auto_settings.automated_paper_trading_enabled:
+        st.info(
+            "**Global automation is enabled.** This is only the master switch. "
+            "Each strategy still shows automation **Off** until you enable it under "
+            "**Strategy Automation** below (per-strategy approval required)."
+        )
 
     st.subheader("Global Controls")
 
@@ -126,7 +135,8 @@ def render(database: DatabaseManager) -> None:
     st.write(f"Reconciliation warnings: {status['reconciliation_warnings']}")
 
     st.subheader("Strategy Automation")
-    strategies = database.list_strategies()
+    registry = get_registry()
+    strategies = database.list_strategies(StrategyStatus.ACTIVE)
     if not strategies:
         st.info("No strategies configured.")
     else:
@@ -141,7 +151,12 @@ def render(database: DatabaseManager) -> None:
             with st.expander(f"{strategy.name} ({strategy.symbol})"):
                 cols = st.columns(4)
                 cols[0].write(f"Status: {strategy.status.value}")
-                cols[1].write(f"Automation: {'Yes' if strategy.automation_enabled else 'No'}")
+                auto_label, auto_detail = explain_strategy_automation(
+                    strategy, auto_settings, registry
+                )
+                cols[1].write(auto_label.replace("Per-strategy: ", "Automation: "))
+                if auto_detail:
+                    st.caption(auto_detail)
                 cols[2].write(f"Position: {local_qty}")
                 cols[3].write(f"Cash: {format_currency(float(ledger.get_available_cash(strategy.id)))}")
                 if latest_signal:

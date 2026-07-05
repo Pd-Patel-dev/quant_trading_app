@@ -36,10 +36,12 @@ def _clear_stale_project_modules() -> None:
         "portfolio",
         "broker",
         "config",
+        "research",
         "strategies",
         "backtesting",
         "automation",
         "workers",
+        "market_data",
     )
     for module_name in list(sys.modules):
         if module_name in prefixes or any(module_name.startswith(f"{prefix}.") for prefix in prefixes):
@@ -53,7 +55,7 @@ import streamlit as st
 
 from config.settings import get_settings
 from data.database import DatabaseManager
-from views import about, automation, backtest, dashboard, paper_account, paper_trading, portfolio, strategies
+from views import about, automation, crypto_paper_trading, dashboard, market_data, multi_asset_lab, paper_account, paper_trading, portfolio, strategies, strategy_lab
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -74,20 +76,29 @@ def main() -> None:
     def dashboard_page() -> None:
         dashboard.render(database)
 
-    def backtest_page() -> None:
-        backtest.render(database)
-
     def strategies_page() -> None:
         strategies.render(database)
 
     def paper_trading_page() -> None:
         paper_trading.render(database)
 
+    def crypto_paper_trading_page() -> None:
+        crypto_paper_trading.render(database)
+
     def portfolio_page() -> None:
         portfolio.render(database)
 
     def automation_page() -> None:
         automation.render(database)
+
+    def strategy_lab_page() -> None:
+        strategy_lab.render(database)
+
+    def market_data_page() -> None:
+        market_data.render(database)
+
+    def multi_asset_lab_page() -> None:
+        multi_asset_lab.render(database)
 
     pages = {
         "Overview": [
@@ -101,24 +112,44 @@ def main() -> None:
         ],
         "Research": [
             st.Page(
-                backtest_page,
-                title="Run Backtest",
-                icon="🧪",
-                url_path="backtest",
-            ),
-            st.Page(
                 strategies_page,
                 title="Strategies",
                 icon="📐",
                 url_path="strategies",
             ),
+            st.Page(
+                strategy_lab_page,
+                title="Strategy Lab",
+                icon="🔬",
+                url_path="strategy-lab",
+            ),
+            st.Page(
+                multi_asset_lab_page,
+                title="Multi-Asset Lab",
+                icon="🌐",
+                url_path="multi-asset-lab",
+            ),
+        ],
+        "Data": [
+            st.Page(
+                market_data_page,
+                title="Market Data",
+                icon="💾",
+                url_path="market-data",
+            ),
         ],
         "Trading": [
             st.Page(
                 paper_trading_page,
-                title="Paper Trading",
+                title="Stock Paper Trading",
                 icon="📝",
                 url_path="paper-trading",
+            ),
+            st.Page(
+                crypto_paper_trading_page,
+                title="Crypto Paper Trading",
+                icon="🪙",
+                url_path="crypto-paper-trading",
             ),
             st.Page(
                 portfolio_page,

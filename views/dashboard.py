@@ -43,6 +43,7 @@ def render(database: DatabaseManager) -> None:
         st.metric("Open Paper Orders", len(database.list_open_paper_orders()))
     with col8:
         st.metric("Unknown Orders", database.count_unknown_orders())
+    st.caption(f"Capital source: {allocation_manager.capital_source_label}")
 
     auto_settings = database.get_automation_settings()
     st.subheader("Automation Status")
@@ -83,7 +84,7 @@ def render(database: DatabaseManager) -> None:
     st.subheader("Research Performance")
     recent = database.get_recent_backtests(limit=5)
     if not recent:
-        render_empty_state("No backtests yet", "Run a backtest from the Research section.")
+        render_empty_state("No backtests yet", "Run a backtest from Strategy Lab or Multi-Asset Lab.")
     else:
         for run in recent:
             with st.expander(f"{run['symbol']} - {run['strategy_name']}"):

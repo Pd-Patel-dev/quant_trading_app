@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 
+from tests.conftest import create_approved_active_strategy, seed_backtest_for_approval
 from core.exceptions import AllocationError
 from core.models import EntryPolicy, StrategyStatus
 from portfolio.allocation_manager import AllocationManager
@@ -12,7 +13,7 @@ from services.strategy_service import StrategyService
 
 def _create_strategy(db, allocation: Decimal = Decimal("5000")) -> int:
     service = StrategyService(db)
-    return service.create_strategy(
+    return service.create_moving_average_strategy(
         name="Test Strategy",
         symbol="SPY",
         short_window=50,
@@ -61,14 +62,14 @@ def test_cannot_reduce_below_committed(temp_db) -> None:
 
 
 def test_only_one_active_strategy_per_symbol(temp_db) -> None:
+    id1 = create_approved_active_strategy(temp_db, name="S1")
     service = StrategyService(temp_db)
-    id1 = service.create_strategy(
-        "S1", "SPY", 50, 200, Decimal("5000"), Decimal("0.05"),
-        EntryPolicy.WAIT_FOR_NEXT_CROSSOVER, activate=True,
+    seed_backtest_for_approval(temp_db, "moving_average_crossover", "SPY")
+    id2 = service.create_moving_average_strategy(
+        "S2", "SPY", 50, 200, Decimal("5000"), Decimal("0.05"),
+        EntryPolicy.WAIT_FOR_NEXT_CROSSOVER, activate=False,
     )
+    temp_db.update_strategy_paper_approval(id2, approved=True, approved_at="2026-01-01T00:00:00+00:00")
     with pytest.raises(AllocationError):
-        service.create_strategy(
-            "S2", "SPY", 50, 200, Decimal("5000"), Decimal("0.05"),
-            EntryPolicy.WAIT_FOR_NEXT_CROSSOVER, activate=True,
-        )
+        service.activate(id2)
     assert id1 > 0
